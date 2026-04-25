@@ -1,0 +1,9 @@
+--- Test Set Metrics ---
+Precision: 0.0025
+Recall: 0.5522
+F1-Score: 0.0050
+
+--- XGBoost Feature Importances (Weight) ---
+amount: 993.0
+txn_count_120s: 35.0
+ptr_ratio: 842.0

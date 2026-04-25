@@ -1,0 +1,39 @@
+# Never, ever commit these
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.pfx
+*.jks
+*.keystore
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+service-account.json
+google-services.json      # Flutter/Firebase secret
+firebase_options.dart      # If it contains sensitive keys
+client_secret.json
+client_secrets.json
+credentials.json
+token.json
+local.properties          # Android/Flutter local properties
+.aws/
+.credentials/
+secrets/
+# C++ Build folders
+/build/
+/bin/
+/obj/
+*.exe
+*.out
+*.app
+.vscode/                  # Personal editor settings
+.idea/
+# Don't upload massive models to Git
+*.bin
+*.pt
+*.onnx
+# If your XGBoost weights are huge, ignore the .json too
+xgboost_model.json
