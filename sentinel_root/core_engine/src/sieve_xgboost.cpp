@@ -185,14 +185,13 @@ MuleClassification SieveXGBoost::classify(
 
     // ── STAGE 3: XGBoost ML Fallback ────────────────────────────────────────
     // Heuristics were inconclusive — delegate to the trained model.
-    // We use event count and trigger amount as proxy features.
+    // Feature vector: [amount, txn_count_120s, ptr_ratio, jitter_sigma]
     const float event_count_f = static_cast<float>(windowed.size());
-    // Estimate a synthetic inter-event interval in ms from the window
-    const float synthetic_interval_ms = windowed.size() > 1
-        ? static_cast<float>(time_window_s * 1000.0 / (windowed.size() - 1))
-        : 0.0f;
+    const float ptr_val = compute_ptr(windowed);
+    const float ptr_for_ml = (ptr_val >= 0.0f) ? ptr_val : 0.0f;
+    const float jitter_for_ml = static_cast<float>(compute_jitter_stddev(windowed));
 
-    const float ml_score = evaluate(trigger_amount_inr, static_cast<int>(event_count_f), synthetic_interval_ms);
+    const float ml_score = evaluate(trigger_amount_inr, event_count_f, ptr_for_ml, jitter_for_ml);
     std::cout << "[Sieve] ML fallback score = " << ml_score << "\n";
 
     // Thresholds for ML-path classification
@@ -207,21 +206,23 @@ MuleClassification SieveXGBoost::classify(
 // ─────────────────────────────────────────────────
 
 float SieveXGBoost::evaluate(
-    float transaction_amount,
-    int   passes_through_count,
-    float time_interval_ms) const
+    float amount,
+    float txn_count_120s,
+    float ptr_ratio,
+    float jitter_sigma) const
 {
     if (!booster_) return 0.0f; // Graceful degradation if model failed
 
-    // Single-row feature matrix: [amount, hop_count, interval_ms]
-    float data[3] = {
-        transaction_amount,
-        static_cast<float>(passes_through_count),
-        time_interval_ms
+    // Feature vector must match training order: [amount, txn_count_120s, ptr_ratio, jitter_sigma]
+    float data[4] = {
+        amount,
+        txn_count_120s,
+        ptr_ratio,
+        jitter_sigma
     };
 
     DMatrixHandle dmatrix;
-    if (XGDMatrixCreateFromMat(data, 1, 3, /*missing=*/-1.0f, &dmatrix) != 0) {
+    if (XGDMatrixCreateFromMat(data, 1, 4, /*missing=*/-1.0f, &dmatrix) != 0) {
         return 0.0f;
     }
 

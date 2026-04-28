@@ -9,7 +9,7 @@ FirestoreClient::FirestoreClient(std::string_view project_id) : project_id_(proj
 void FirestoreClient::push_alert(std::string_view alert_json) {
     CURL* curl = curl_easy_init();
     if (curl) {
-        std::string url = "https://firestore.googleapis.com/v1/projects/" + project_id_ + "/databases/(default)/documents/alerts";
+        std::string url = "https://firestore.googleapis.com/v1/projects/" + project_id_ + "/databases/(default)/documents/live_alerts";
         curl_easy_setopt(curl, CURLOPT_URL, url.c_str());
         
         struct curl_slist* headers = NULL;

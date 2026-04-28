@@ -23,7 +23,7 @@ class FirestoreService {
     if (_db == null) return Stream.value([]); // Disabled stream fallback
     
     return _db!
-        .collection('alerts')
+        .collection('live_alerts')
         .orderBy('timestamp', descending: true)
         .limit(50)
         .snapshots()

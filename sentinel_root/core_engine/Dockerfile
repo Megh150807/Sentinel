@@ -13,6 +13,7 @@ WORKDIR /app
 COPY CMakeLists.txt .
 COPY src/ ./src/
 COPY include/ ./include/
+COPY xgboost_model.json .
 
 RUN mkdir build && cd build && cmake .. && make -j$(nproc)
 

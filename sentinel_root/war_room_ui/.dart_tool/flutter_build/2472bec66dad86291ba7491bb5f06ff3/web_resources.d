@@ -1,1 +1,0 @@
- /workspaces/sentinel-v1/sentinel_root/war_room_ui/build/web/favicon.png /workspaces/sentinel-v1/sentinel_root/war_room_ui/build/web/manifest.json:  /workspaces/sentinel-v1/sentinel_root/war_room_ui/web/favicon.png /workspaces/sentinel-v1/sentinel_root/war_room_ui/web/index.html /workspaces/sentinel-v1/sentinel_root/war_room_ui/web/manifest.json

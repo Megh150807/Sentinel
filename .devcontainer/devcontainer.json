@@ -1,0 +1,26 @@
+{
+    "name": "Sentinel Monolith (C++ & Flutter)",
+    "build": {
+        "dockerfile": "Dockerfile"
+    },
+    "remoteUser": "sentinel",
+    "runArgs": [
+        "--cap-add=SYS_PTRACE",
+        "--security-opt",
+        "seccomp=unconfined"
+    ],
+    "customizations": {
+        "vscode": {
+            "settings": {
+                "terminal.integrated.defaultProfile.linux": "bash"
+            },
+            "extensions": [
+                "ms-vscode.cpptools",
+                "ms-vscode.cmake-tools",
+                "ms-python.python",
+                "Dart-Code.flutter",
+                "Dart-Code.dart-code"
+            ]
+        }
+    }
+}

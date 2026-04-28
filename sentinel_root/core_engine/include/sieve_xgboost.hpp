@@ -57,12 +57,15 @@ public:
     ) const;
 
     /// Raw ML score [0,1] — used as a fallback when heuristics are inconclusive.
-    /// @param transaction_amount   INR amount
-    /// @param passes_through_count Number of relay hops
-    /// @param time_interval_ms     Time between hops in milliseconds
-    float evaluate(float transaction_amount,
-                   int   passes_through_count,
-                   float time_interval_ms) const;
+    /// Feature vector matches the trained model: [amount, txn_count_120s, ptr_ratio, jitter_sigma]
+    /// @param amount            Transaction amount in INR
+    /// @param txn_count_120s    Number of transactions in the 120s window
+    /// @param ptr_ratio         Pass-Through Rate ratio [0.0, 1.0]
+    /// @param jitter_sigma      Jitter standard deviation in seconds
+    float evaluate(float amount,
+                   float txn_count_120s,
+                   float ptr_ratio,
+                   float jitter_sigma) const;
 
 private:
     BoosterHandle booster_ = nullptr;

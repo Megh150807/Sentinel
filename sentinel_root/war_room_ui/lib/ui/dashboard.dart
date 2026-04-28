@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../state/app_state.dart';
-import 'node_graph.dart';
 import 'threat_feed.dart';
+import 'ring_detection_panel.dart';
 
 class DashboardScreen extends ConsumerWidget {
   const DashboardScreen({super.key});
@@ -12,17 +12,12 @@ class DashboardScreen extends ConsumerWidget {
     final state = ref.watch(appStateProvider);
 
     return Scaffold(
-      backgroundColor: const Color(0xFF050505), // Deep dark slate
+      backgroundColor: const Color(0xFF050505),
       appBar: AppBar(
         backgroundColor: const Color(0xFF0D1117),
         title: const Text(
-          'SENTINEL // COMMAND',
-          style: TextStyle(
-            color: Colors.cyan,
-            letterSpacing: 2.0,
-            fontWeight: FontWeight.bold,
-            fontFamily: 'monospace',
-          ),
+          'SENTINEL // CLOUD RUN',
+          style: TextStyle(color: Colors.cyan, letterSpacing: 2.0, fontWeight: FontWeight.bold, fontFamily: 'monospace'),
         ),
         elevation: 0,
         actions: [
@@ -33,12 +28,12 @@ class DashboardScreen extends ConsumerWidget {
                 children: [
                   Container(
                     width: 8, height: 8,
-                    decoration: const BoxDecoration(color: Colors.redAccent, shape: BoxShape.circle),
+                    decoration: BoxDecoration(color: state.isSimulating ? Colors.redAccent : Colors.cyan, shape: BoxShape.circle),
                   ),
                   const SizedBox(width: 8),
-                  const Text(
-                    'LIVE',
-                    style: TextStyle(color: Colors.redAccent, fontWeight: FontWeight.bold),
+                  Text(
+                    state.isSimulating ? 'LIVE STREAMING' : 'IDLE',
+                    style: TextStyle(color: state.isSimulating ? Colors.redAccent : Colors.cyan, fontWeight: FontWeight.bold),
                   ),
                 ],
               ),
@@ -48,53 +43,38 @@ class DashboardScreen extends ConsumerWidget {
       ),
       body: Column(
         children: [
-          Expanded(
+          Container(
+            padding: const EdgeInsets.all(16.0),
+            color: const Color(0xFF0D1117),
             child: Row(
               children: [
-                // Sidebar
-                Container(
-                  width: 250,
-                  color: const Color(0xFF0D1117),
-                  padding: const EdgeInsets.all(16.0),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      _buildStatBox('BLOCKED TX', state.blockedTransactions.toString(), Colors.redAccent),
-                      const SizedBox(height: 16),
-                      _buildStatBox('NETWORK LATENCY', '< 12 ms', Colors.cyan),
-                       const SizedBox(height: 16),
-                      _buildStatBox('THREAT STATUS', state.blockedTransactions > 0 ? 'CRITICAL' : 'NOMINAL', state.blockedTransactions > 0 ? Colors.redAccent : Colors.cyan),
-                      const Spacer(),
-                      
-                      // Mock Intercept Button for local demo without Firebase
-                      ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.redAccent.withOpacity(0.2),
-                          foregroundColor: Colors.redAccent,
-                          side: const BorderSide(color: Colors.redAccent),
-                          minimumSize: const Size(double.infinity, 50),
-                        ),
-                        onPressed: () {
-                           ref.read(appStateProvider.notifier).injectMockAlert();
-                        },
-                        child: const Text("SIMULATE INTERCEPT", style: TextStyle(letterSpacing: 1.2)),
-                      )
-                    ],
-                  ),
-                ),
-                // Main Graph
-                const Expanded(
-                  child: Padding(
-                    padding: EdgeInsets.all(16.0),
-                    child: NodeGraphVisualizer(),
-                  ),
+                Expanded(child: _buildStatBox('BLOCKED TX', state.blockedTransactions.toString(), Colors.redAccent)),
+                const SizedBox(width: 16),
+                Expanded(child: _buildStatBox('TOTAL PROCESSED', state.alerts.length.toString(), Colors.cyan)),
+                const SizedBox(width: 16),
+                Expanded(
+                  child: ElevatedButton(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.cyan.withOpacity(0.2),
+                      foregroundColor: Colors.cyan,
+                      side: const BorderSide(color: Colors.cyan),
+                      minimumSize: const Size(double.infinity, 80),
+                    ),
+                    onPressed: state.isSimulating ? null : () {
+                       ref.read(appStateProvider.notifier).startSimulation();
+                    },
+                    child: const Text("START SIMULATION", style: TextStyle(letterSpacing: 1.2, fontWeight: FontWeight.bold)),
+                  )
                 ),
               ],
             ),
           ),
           
-          // Bottom Threat Feed
-          const ThreatFeedVisualizer(),
+          // Ring Detection Panel (appears when a mule chain is detected)
+          const RingDetectionPanel(),
+          
+          // Expanded Threat Feed taking up the rest of the screen
+          const Expanded(child: ThreatFeedVisualizer()),
         ],
       ),
     );
@@ -102,8 +82,7 @@ class DashboardScreen extends ConsumerWidget {
 
   Widget _buildStatBox(String label, String value, Color color) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(16.0),
+      padding: const EdgeInsets.all(8.0),
       decoration: BoxDecoration(
         color: color.withOpacity(0.05),
         border: Border.all(color: color.withOpacity(0.5)),
@@ -111,10 +90,11 @@ class DashboardScreen extends ConsumerWidget {
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 12, letterSpacing: 1.2)),
-          const SizedBox(height: 8),
-          Text(value, style: TextStyle(color: color, fontSize: 24, fontWeight: FontWeight.bold, fontFamily: 'monospace')),
+          Text(label, style: const TextStyle(color: Colors.white70, fontSize: 10, letterSpacing: 1.2), overflow: TextOverflow.ellipsis, maxLines: 1),
+          const SizedBox(height: 4),
+          Text(value, style: TextStyle(color: color, fontSize: 24, fontWeight: FontWeight.bold, fontFamily: 'monospace'), overflow: TextOverflow.ellipsis, maxLines: 1),
         ],
       ),
     );

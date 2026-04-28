@@ -1,63 +1,30 @@
 // ═══════════════════════════════════════════════════════════════════════════════
 //  main.cpp — Sentinel Core Engine Entry Point
 //
-//  HTTP server receiving Pub/Sub push webhooks from the GCP pipeline.
-//  Orchestrates: Sieve inference → Graph threat analysis → Firestore alert.
+//  Synchronous Cloud Run REST Microservice.
+//  Orchestrates: XGBoost Sieve inference + GraphSniper centrality analysis.
 // ═══════════════════════════════════════════════════════════════════════════════
 
-#include <httplib.h>
+#include <iostream>
+#include <string>
+#include <cstdlib>
+#include <chrono>
+#include "httplib.h"
 #include "nlohmann/json.hpp"
 #include "sieve_xgboost.hpp"
 #include "graph_sniper.hpp"
-#include "firestore_client.hpp"
-#include <curl/curl.h>   // curl_global_init / curl_global_cleanup
-#include <iostream>
-#include <string>
-#include <cstdlib>   // std::getenv
-#include <chrono>
 
 using json = nlohmann::json;
 
 // ─────────────────────────────────────────────────
 //  Configuration helpers
 // ─────────────────────────────────────────────────
-
-/// Returns SENTINEL_MODEL_PATH env var, falling back to "xgboost.json".
 static std::string resolve_model_path() {
     const char* env = std::getenv("SENTINEL_MODEL_PATH");
     if (env && env[0] != '\0') {
-        std::cout << "[Config] Model path from env: " << env << "\n";
         return std::string(env);
     }
-    std::cout << "[Config] SENTINEL_MODEL_PATH not set — using default: xgboost.json\n";
-    return "xgboost.json";
-}
-
-/// Returns SENTINEL_GCP_PROJECT env var, falling back to placeholder.
-static std::string resolve_project_id() {
-    const char* env = std::getenv("SENTINEL_GCP_PROJECT");
-    return (env && env[0] != '\0') ? std::string(env) : "sentinel-project";
-}
-
-// ─────────────────────────────────────────────────
-//  Mock history builder (replace with real ledger lookup)
-// ─────────────────────────────────────────────────
-static std::vector<AccountEvent> build_mock_history(float amount, int event_count) {
-    std::vector<AccountEvent> history;
-    history.reserve(event_count);
-    const double now = std::chrono::duration_cast<std::chrono::duration<double>>(
-        std::chrono::system_clock::now().time_since_epoch()
-    ).count();
-
-    // Simulate a rapid fan-out: alternating credit → debit pairs
-    for (int i = 0; i < event_count; ++i) {
-        AccountEvent ev;
-        ev.timestamp_epoch_s = now - (event_count - i) * 8.0; // ~8s apart
-        ev.amount_inr        = amount * 0.9f;  // slight amount drift
-        ev.is_outgoing       = (i % 2 != 0);   // alternating
-        history.push_back(ev);
-    }
-    return history;
+    return "xgboost_model.json";
 }
 
 // ─────────────────────────────────────────────────
@@ -65,100 +32,121 @@ static std::vector<AccountEvent> build_mock_history(float amount, int event_coun
 // ─────────────────────────────────────────────────
 
 int main() {
-    // ── Fix Issue #3: curl_global_init must be called ONCE at process start,
-    //    not inside the FirestoreClient constructor (not thread-safe there).
-    curl_global_init(CURL_GLOBAL_ALL);
-
-    // ── Sub-system init ──────────────────────────────────────────────────────
-    const std::string model_path  = resolve_model_path();
-    const std::string project_id  = resolve_project_id();
+    const std::string model_path = resolve_model_path();
 
     SieveXGBoost* sieve = nullptr;
     try {
         sieve = new SieveXGBoost(model_path);
+        std::cout << "[Engine] XGBoost Sieve initialized.\n";
     } catch (const std::exception& e) {
         std::cerr << "[WARN] Sieve ML module unavailable: " << e.what()
-                  << "\n       Running in heuristic-only mode.\n";
+                  << "\n       Running in fallback mode.\n";
     }
 
-    GraphSniper    sniper;
-    FirestoreClient firestore(project_id);
+    // GraphSniper for syndicate centrality analysis
+    GraphSniper graph;
 
-    // Mock graph state — replace with live ledger feeds
-    std::vector<Transaction> mock_txs = {
-        {"A", "B", 50000.0f},
-        {"A", "C", 30000.0f},
-        {"B", "D", 48000.0f},
-        {"C", "E", 29500.0f}
-    };
-    sniper.load_graph(mock_txs);
-    std::cout << "[Engine] Graph loaded: " << mock_txs.size() << " edges\n";
-
-    // ── HTTP Server ──────────────────────────────────────────────────────────
     httplib::Server svr;
 
-    svr.Post("/pubsub", [&](const httplib::Request& req, httplib::Response& res) {
+    svr.Options("/intercept", [](const httplib::Request&, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        res.set_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS");
+        res.set_header("Access-Control-Allow-Headers", "Content-Type");
+        res.status = 200;
+    });
+
+    svr.Post("/intercept", [&](const httplib::Request& req, httplib::Response& res) {
+        res.set_header("Access-Control-Allow-Origin", "*");
+        auto start = std::chrono::high_resolution_clock::now();
+
         try {
             auto payload = json::parse(req.body);
 
-            if (!payload.contains("message") ||
-                !payload["message"].contains("data")) {
-                res.status = 400;
-                return;
-            }
+            const std::string txn_id = payload.value("transaction_id", "UNKNOWN");
+            const float jitter_ms    = payload.value("jitter_ms", 0.0f);
+            const float ptr          = payload.value("ptr", 0.0f);
 
-            // ── In production: decode base64 Pub/Sub data & extract fields ──
-            // For now, use representative simulation values:
-            const float  trigger_amount = 50000.0f;     // INR
-            const int    event_count    = 8;             // events in last 120s
-            const auto   history        = build_mock_history(trigger_amount, event_count);
-            const std::string node_id   = "A";
+            // ── Synthesize features matching the trained model ──────────────
+            // The real model was trained on: [amount, txn_count_120s, ptr_ratio, jitter_sigma]
+            float synth_amount = ptr > 0.85f ? 10000.0f : 100.0f;
+            float txn_count_120s = jitter_ms < 500.0f ? 10.0f : 2.0f;
+            float ptr_ratio = ptr;
+            float jitter_sigma = jitter_ms / 1000.0f; // Convert ms to seconds
 
-            // ── Stage 1+2+3: Sieve Classification ───────────────────────────
-            MuleClassification verdict = MuleClassification::BENIGN;
-            float ml_fallback_score    = 0.5f;
+            bool is_blocked = false;
+            float ml_risk = 0.0f;
 
             if (sieve) {
-                verdict = sieve->classify(trigger_amount, history, 120.0);
+                ml_risk = sieve->evaluate(synth_amount, txn_count_120s, ptr_ratio, jitter_sigma);
+                
+                // Block if ML risk is high, OR heuristic thresholds are crossed
+                if (ml_risk > 0.70f || ptr > 0.85f || jitter_ms < 100.0f) {
+                    is_blocked = true;
+                }
             } else {
-                // Heuristic-only fallback when model is unavailable
-                ml_fallback_score = 0.8f;
-                verdict = MuleClassification::HUMAN_MULE;
+                // Fallback heuristic if XGBoost fails to load
+                if (ptr > 0.85f || jitter_ms < 100.0f) {
+                    is_blocked = true;
+                }
             }
 
-            // ── Graph Threat Score ───────────────────────────────────────────
-            const float graph_risk     = sniper.analyze_syndicate_centrality(node_id);
-            const float ml_risk        = sieve
-                ? sieve->evaluate(trigger_amount, event_count, 8000.0f)
-                : ml_fallback_score;
+            // ── GraphSniper: Build live transaction graph ────────────────────
+            // Edges are sender_upi → receiver_upi (real account identifiers)
+            // Mule accounts accumulate edges (high centrality), legit accounts stay isolated
+            const std::string sender = payload.value("sender_upi", "");
+            const std::string receiver = payload.value("receiver_upi", "");
 
-            // Combined scoring: 60% ML / 40% graph topology
-            const float combined_score = ml_risk * 0.6f + graph_risk * 0.4f;
-
-            std::cout << "[Engine] Node=" << node_id
-                      << " | Verdict=" << classification_label(verdict)
-                      << " | ML=" << ml_risk
-                      << " | Graph=" << graph_risk
-                      << " | Combined=" << combined_score << "\n";
-
-            // ── Interdiction Threshold ───────────────────────────────────────
-            const bool is_critical = (verdict == MuleClassification::CRITICAL_MULE)
-                                  || (verdict != MuleClassification::BENIGN && combined_score >= 0.90f);
-
-            if (is_critical) {
-                json alert;
-                alert["fields"]["score"]["doubleValue"]      = combined_score;
-                alert["fields"]["verdict"]["stringValue"]    = classification_label(verdict);
-                alert["fields"]["node_id"]["stringValue"]    = node_id;
-                alert["fields"]["trigger_amount"]["doubleValue"] = trigger_amount;
-                alert["fields"]["timestamp"]["stringValue"]  = std::to_string(
-                    std::chrono::system_clock::now().time_since_epoch().count()
-                );
-
-                firestore.push_alert(alert.dump());
-                std::cout << "[!] INTERDICTION FIRED → Firestore alert written.\n";
+            float centrality = 0.0f;
+            if (!sender.empty() && !receiver.empty()) {
+                graph.add_transaction({sender, receiver, synth_amount});
+                float sender_centrality = graph.analyze_syndicate_centrality(sender);
+                float receiver_centrality = graph.analyze_syndicate_centrality(receiver);
+                centrality = std::max(sender_centrality, receiver_centrality);
             }
 
+            // ── Flag blocked UPI IDs and detect mule rings ──────────────────
+            // Only flag the RECEIVER — they're the account collecting money (the mule).
+            // The sender may be an innocent victim who got scammed.
+            json rings_json = json::array();
+            if (is_blocked && !sender.empty() && !receiver.empty()) {
+                graph.flag_node(receiver, txn_id);
+
+                auto rings = graph.detect_rings();
+                for (const auto& ring : rings) {
+                    json rj;
+                    rj["chain"] = ring.chain;
+                    rj["evidence_txn_ids"] = ring.transaction_ids;
+                    rings_json.push_back(rj);
+
+                    std::cout << "[GraphSniper] RING: ";
+                    for (const auto& node : ring.chain) std::cout << node << " -> ";
+                    std::cout << "END (" << ring.transaction_ids.size() << " evidence txns)\n";
+                }
+            }
+
+            auto end = std::chrono::high_resolution_clock::now();
+            auto duration_us = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+
+            json response;
+            response["status"] = is_blocked ? "blocked" : "allowed";
+            response["latency_us"] = duration_us;
+            response["transaction_id"] = txn_id;
+            response["sender_upi"] = sender;
+            response["receiver_upi"] = receiver;
+            response["ml_risk_score"] = ml_risk;
+            response["centrality_score"] = centrality;
+            response["ptr"] = ptr;
+            response["jitter_ms"] = jitter_ms;
+            if (!rings_json.empty()) {
+                response["rings"] = rings_json;
+            }
+
+            std::cout << "[Engine] Processed " << txn_id << " in " << duration_us << "us."
+                      << " Status: " << response["status"]
+                      << " | ML: " << ml_risk
+                      << " | Centrality: " << centrality << "\n";
+
+            res.set_content(response.dump(), "application/json");
             res.status = 200;
 
         } catch (const json::exception& e) {
@@ -170,7 +158,6 @@ int main() {
         }
     });
 
-    // Health-check for Cloud Run / load balancer
     svr.Get("/health", [](const httplib::Request&, httplib::Response& res) {
         res.set_content("{\"status\":\"operational\"}", "application/json");
         res.status = 200;
@@ -184,6 +171,5 @@ int main() {
     svr.listen("0.0.0.0", 8080);
 
     delete sieve;
-    curl_global_cleanup();
     return 0;
 }
